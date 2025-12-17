@@ -1,9 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, FlatList, KeyboardAvoidingView, Platform, Text, TextInput, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../lib/auth";
+import { AppButton, Muted, Screen } from "../../ui/components";
+import { colors, radius, space } from "../../ui/theme";
 
 type MatchRow = {
   id: string | number;
@@ -19,6 +30,15 @@ type MessageRow = {
   body: string;
   created_at: string;
 };
+
+function formatTime(iso: string) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
 
 export default function ChatDetailScreen() {
   const router = useRouter();
@@ -38,9 +58,7 @@ export default function ChatDetailScreen() {
   const listRef = useRef<FlatList<MessageRow>>(null);
 
   function scrollToEnd() {
-    setTimeout(() => {
-      listRef.current?.scrollToEnd({ animated: true });
-    }, 50);
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
   }
 
   async function loadMatchAndOther() {
@@ -87,8 +105,7 @@ export default function ChatDetailScreen() {
   }
 
   async function sendMessage() {
-    if (!userId) return;
-    if (!matchId) return;
+    if (!userId || !matchId) return;
 
     const body = text.trim();
     if (!body) return;
@@ -101,10 +118,11 @@ export default function ChatDetailScreen() {
         body,
         created_at: new Date().toISOString(),
       });
-
       if (error) throw error;
+
       setText("");
-      // Realtime subscription will append the message.
+      // Realtime subscription will append; we still scroll.
+      scrollToEnd();
     } catch (e: any) {
       Alert.alert("Send failed", e?.message ?? String(e));
     } finally {
@@ -152,7 +170,10 @@ export default function ChatDetailScreen() {
             if (exists) return prev;
 
             const next = [...prev, newMsg];
-            next.sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+            next.sort(
+              (a: any, b: any) =>
+                new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+            );
             return next;
           });
 
@@ -168,25 +189,32 @@ export default function ChatDetailScreen() {
 
   if (!userId) {
     return (
-      <SafeAreaView style={{ flex: 1, padding: 16, justifyContent: "center" }}>
-        <Text>Not signed in.</Text>
-      </SafeAreaView>
+      <Screen style={{ justifyContent: "center" }}>
+        <Muted>Not signed in.</Muted>
+      </Screen>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1 }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <Screen style={{ padding: 0, gap: 0 }}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
         {/* Header */}
-        <View style={{ padding: 16, borderBottomWidth: 1, gap: 8 }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-            <Button title="Back" onPress={() => router.back()} />
-            <Text style={{ fontSize: 18, fontWeight: "700" }}>{otherName}</Text>
-            <View style={{ width: 60 }} />
+        <View style={styles.header}>
+          <Pressable onPress={() => router.back()} style={styles.backBtn}>
+            <Text style={styles.backText}>Back</Text>
+          </Pressable>
+
+          <View style={{ flex: 1, alignItems: "center" }}>
+            <Text style={styles.headerTitle}>{otherName}</Text>
+            <Text style={styles.headerSub}>
+              {otherUserId ? otherUserId.slice(0, 6) : ""}
+            </Text>
           </View>
-          <Text style={{ opacity: 0.6, fontSize: 12 }}>
-            Match: {match ? String(match.id) : matchId}
-          </Text>
+
+          <View style={{ width: 60 }} />
         </View>
 
         {/* Messages */}
@@ -194,40 +222,154 @@ export default function ChatDetailScreen() {
           ref={listRef}
           data={messages}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={{ padding: 16, gap: 10 }}
+          contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
             const mine = item.sender_user === userId;
             return (
               <View
-                style={{
-                  alignSelf: mine ? "flex-end" : "flex-start",
-                  maxWidth: "82%",
-                  borderWidth: 1,
-                  borderRadius: 12,
-                  padding: 10,
-                }}
+                style={[
+                  styles.msgRow,
+                  { justifyContent: mine ? "flex-end" : "flex-start" },
+                ]}
               >
-                <Text style={{ fontSize: 14 }}>{item.body}</Text>
-                <Text style={{ opacity: 0.6, fontSize: 11, marginTop: 6 }}>
-                  {mine ? "You" : otherName}
-                </Text>
+                <View
+                  style={[
+                    styles.bubble,
+                    mine ? styles.bubbleMine : styles.bubbleOther,
+                  ]}
+                >
+                  <Text style={[styles.msgText, mine ? { color: "#fff" } : { color: colors.text }]}>
+                    {item.body}
+                  </Text>
+                  <Text style={[styles.time, mine ? { color: "rgba(255,255,255,0.8)" } : { color: colors.muted }]}>
+                    {formatTime(item.created_at)}
+                  </Text>
+                </View>
               </View>
             );
           }}
-          ListEmptyComponent={<Text style={{ opacity: 0.7 }}>No messages yet.</Text>}
+          ListEmptyComponent={
+            <View style={{ paddingTop: 18 }}>
+              <Muted>No messages yet. Say hello.</Muted>
+            </View>
+          }
         />
 
         {/* Composer */}
-        <View style={{ padding: 16, borderTopWidth: 1, gap: 10 }}>
+        <View style={styles.composer}>
           <TextInput
             value={text}
             onChangeText={setText}
-            placeholder="Type a message..."
-            style={{ borderWidth: 1, padding: 12, borderRadius: 12 }}
+            placeholder="Message…"
+            placeholderTextColor={colors.muted}
+            style={styles.input}
+            multiline
           />
-          <Button title={loading ? "Sending..." : "Send"} onPress={sendMessage} disabled={loading || !text.trim()} />
+          <View style={{ width: 110 }}>
+            <AppButton
+              title={loading ? "Sending..." : "Send"}
+              onPress={sendMessage}
+              disabled={loading || !text.trim()}
+            />
+          </View>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  header: {
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.card,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  backBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: "#fff",
+    width: 60,
+    alignItems: "center",
+  },
+  backText: {
+    fontWeight: "700",
+    color: colors.text,
+  },
+  headerTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  headerSub: {
+    fontSize: 12,
+    color: colors.muted,
+    marginTop: 2,
+  },
+
+  listContent: {
+    paddingHorizontal: space.md,
+    paddingVertical: space.md,
+    gap: 10,
+  },
+  msgRow: {
+    flexDirection: "row",
+  },
+  bubble: {
+    maxWidth: "82%",
+    borderRadius: radius.lg,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  bubbleMine: {
+    backgroundColor: colors.primary,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderTopRightRadius: 6,
+  },
+  bubbleOther: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderTopLeftRadius: 6,
+  },
+  msgText: {
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: "500",
+  },
+  time: {
+    fontSize: 11,
+    marginTop: 6,
+    opacity: 0.9,
+  },
+
+  composer: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 10,
+    padding: space.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.card,
+  },
+  input: {
+    flex: 1,
+    minHeight: 44,
+    maxHeight: 120,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: "#fff",
+    color: colors.text,
+  },
+});

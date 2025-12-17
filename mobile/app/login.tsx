@@ -1,10 +1,12 @@
 import React, { useState } from "react";
-import { Alert, Button, SafeAreaView, Text, TextInput, View } from "react-native";
+import { Alert, View } from "react-native";
 import { useRouter } from "expo-router";
 import { supabase } from "../lib/supabase";
+import { AppButton, Card, H1, Muted, Screen, TextField } from "../ui/components";
 
 export default function LoginScreen() {
   const router = useRouter();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -36,32 +38,35 @@ export default function LoginScreen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, padding: 16, justifyContent: "center", gap: 12 }}>
-      <Text style={{ fontSize: 24, fontWeight: "700" }}>TrafficLight</Text>
+    <Screen style={{ justifyContent: "center" }}>
+      <View style={{ gap: 10 }}>
+        <H1>TrafficLight</H1>
+        <Muted>Sign in to share your status and connect nearby.</Muted>
+      </View>
 
-      <View style={{ gap: 8 }}>
-        <Text>Email</Text>
-        <TextInput
+      <Card style={{ gap: 14 }}>
+        <TextField
+          label="Email"
           value={email}
           onChangeText={setEmail}
           autoCapitalize="none"
           keyboardType="email-address"
-          style={{ borderWidth: 1, padding: 10, borderRadius: 10 }}
+          placeholder="you@example.com"
         />
-      </View>
 
-      <View style={{ gap: 8 }}>
-        <Text>Password</Text>
-        <TextInput
+        <TextField
+          label="Password"
           value={password}
           onChangeText={setPassword}
           secureTextEntry
-          style={{ borderWidth: 1, padding: 10, borderRadius: 10 }}
+          placeholder="••••••••"
         />
-      </View>
 
-      <Button title={loading ? "Working..." : "Sign In"} onPress={signIn} disabled={loading} />
-      <Button title={loading ? "Working..." : "Sign Up"} onPress={signUp} disabled={loading} />
-    </SafeAreaView>
+        <View style={{ gap: 10, marginTop: 6 }}>
+          <AppButton title={loading ? "Signing in..." : "Sign In"} onPress={signIn} disabled={loading} />
+          <AppButton title={loading ? "Signing up..." : "Create Account"} onPress={signUp} disabled={loading} variant="secondary" />
+        </View>
+      </Card>
+    </Screen>
   );
 }

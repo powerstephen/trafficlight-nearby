@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Alert, Button, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Alert, ScrollView, View } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../lib/auth";
+import { AppButton, Card, H1, H2, Muted, Pill, Screen } from "../../ui/components";
 
 type RequestRow = {
   id: string | number;
@@ -45,10 +45,10 @@ export default function RequestsScreen() {
     setNameMap((prev) => ({ ...prev, ...next }));
   }
 
-  async function refresh() {
+  async function refresh(silent = false) {
     if (!userId) return;
 
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const { data: reqs, error } = await supabase
         .from("connect_requests")
@@ -63,9 +63,9 @@ export default function RequestsScreen() {
       setOutgoing(all.filter((r) => r.from_user === userId && r.status === "pending"));
       await loadNames(all.flatMap((r) => [r.from_user, r.to_user]));
     } catch (e: any) {
-      Alert.alert("Load error", e?.message ?? String(e));
+      if (!silent) Alert.alert("Load error", e?.message ?? String(e));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
@@ -89,7 +89,6 @@ export default function RequestsScreen() {
 
       const pair = orderedPair(req.from_user, req.to_user);
 
-      // matches.request_id is NOT NULL in your setup, so include it.
       const { error: mErr } = await supabase.from("matches").insert({
         request_id: String(req.id),
         user_a: pair.user_a,
@@ -98,8 +97,8 @@ export default function RequestsScreen() {
 
       if (mErr && String(mErr.code) !== "23505") throw mErr;
 
+      await refresh(true);
       Alert.alert("Matched", "Request accepted.");
-      await refresh();
     } catch (e: any) {
       Alert.alert("Accept failed", e?.message ?? String(e));
     } finally {
@@ -121,8 +120,8 @@ export default function RequestsScreen() {
 
       if (error) throw error;
 
+      await refresh(true);
       Alert.alert("Declined", "Request declined.");
-      await refresh();
     } catch (e: any) {
       Alert.alert("Decline failed", e?.message ?? String(e));
     } finally {
@@ -130,55 +129,123 @@ export default function RequestsScreen() {
     }
   }
 
+  // Initial load
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
+  // Realtime auto-refresh
+  useEffect(() => {
+    if (!userId) return;
+
+    const chIncoming = supabase
+      .channel(`connect_requests:to:${userId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "connect_requests", filter: `to_user=eq.${userId}` },
+        () => refresh(true)
+      )
+      .subscribe();
+
+    const chOutgoing = supabase
+      .channel(`connect_requests:from:${userId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "connect_requests", filter: `from_user=eq.${userId}` },
+        () => refresh(true)
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(chIncoming);
+      supabase.removeChannel(chOutgoing);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
   if (!userId) {
     return (
-      <SafeAreaView style={{ flex: 1, padding: 16, justifyContent: "center" }}>
-        <Text>Not signed in.</Text>
-      </SafeAreaView>
+      <Screen style={{ justifyContent: "center" }}>
+        <Muted>Not signed in.</Muted>
+      </Screen>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, padding: 16, gap: 12 }}>
-      <Text style={{ fontSize: 22, fontWeight: "700" }}>Requests</Text>
-
-      <Button title={loading ? "Loading..." : "Refresh"} onPress={refresh} disabled={loading} />
-
-      <View style={{ gap: 8 }}>
-        <Text style={{ fontSize: 16, fontWeight: "700" }}>Incoming</Text>
-        {incoming.length === 0 ? (
-          <Text style={{ opacity: 0.7 }}>No incoming requests.</Text>
-        ) : (
-          incoming.map((r) => (
-            <View key={String(r.id)} style={{ borderWidth: 1, padding: 10, borderRadius: 10, gap: 8 }}>
-              <Text>From: {showName(r.from_user)}</Text>
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                <Button title="Accept" onPress={() => acceptRequest(r)} disabled={loading} />
-                <Button title="Decline" onPress={() => declineRequest(r)} disabled={loading} />
-              </View>
-            </View>
-          ))
-        )}
+    <Screen>
+      <View style={{ gap: 6 }}>
+        <H1>Requests</H1>
+        <Muted>Incoming and outgoing connection requests.</Muted>
       </View>
 
-      <View style={{ gap: 8 }}>
-        <Text style={{ fontSize: 16, fontWeight: "700" }}>Outgoing</Text>
-        {outgoing.length === 0 ? (
-          <Text style={{ opacity: 0.7 }}>No outgoing pending requests.</Text>
-        ) : (
-          outgoing.map((r) => (
-            <View key={String(r.id)} style={{ borderWidth: 1, padding: 10, borderRadius: 10, gap: 6 }}>
-              <Text>To: {showName(r.to_user)}</Text>
-              <Text style={{ opacity: 0.7 }}>Status: {r.status}</Text>
+      <AppButton
+        title={loading ? "Refreshing..." : "Refresh"}
+        onPress={() => refresh()}
+        disabled={loading}
+        variant="secondary"
+      />
+
+      <ScrollView contentContainerStyle={{ gap: 14, paddingBottom: 24 }}>
+        <Card style={{ gap: 10 }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <H2>Incoming</H2>
+            <Pill text={`${incoming.length}`} tone={incoming.length ? "orange" : "neutral"} />
+          </View>
+
+          {incoming.length === 0 ? (
+            <Muted>No incoming requests.</Muted>
+          ) : (
+            <View style={{ gap: 10 }}>
+              {incoming.map((r) => (
+                <View key={String(r.id)} style={{ borderWidth: 1, borderRadius: 14, padding: 12, gap: 10 }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                    <View style={{ gap: 2 }}>
+                      <H2>{showName(r.from_user)}</H2>
+                      <Muted>Wants to connect</Muted>
+                    </View>
+                    <Pill text="PENDING" tone="orange" />
+                  </View>
+
+                  <View style={{ flexDirection: "row", gap: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <AppButton title="Accept" onPress={() => acceptRequest(r)} disabled={loading} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <AppButton title="Decline" onPress={() => declineRequest(r)} disabled={loading} variant="secondary" />
+                    </View>
+                  </View>
+                </View>
+              ))}
             </View>
-          ))
-        )}
-      </View>
-    </SafeAreaView>
+          )}
+        </Card>
+
+        <Card style={{ gap: 10 }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <H2>Outgoing</H2>
+            <Pill text={`${outgoing.length}`} tone={outgoing.length ? "orange" : "neutral"} />
+          </View>
+
+          {outgoing.length === 0 ? (
+            <Muted>No outgoing pending requests.</Muted>
+          ) : (
+            <View style={{ gap: 10 }}>
+              {outgoing.map((r) => (
+                <View key={String(r.id)} style={{ borderWidth: 1, borderRadius: 14, padding: 12, gap: 8 }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                    <View style={{ gap: 2 }}>
+                      <H2>{showName(r.to_user)}</H2>
+                      <Muted>Waiting for response</Muted>
+                    </View>
+                    <Pill text="PENDING" tone="orange" />
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </Card>
+      </ScrollView>
+    </Screen>
   );
 }

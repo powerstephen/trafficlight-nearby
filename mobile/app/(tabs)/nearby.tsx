@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import * as Location from "expo-location";
-import { Alert, Button, Text, TextInput, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Alert, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../lib/auth";
+import { AppButton, Card, H1, H2, Muted, Pill, Screen } from "../../ui/components";
+import TrafficLight from "../../ui/TrafficLight";
 
 function gridCellKey(lat: number, lng: number, bandM: number): string {
   const metersPerDegLat = 111_320;
@@ -32,6 +33,10 @@ type NearbyItem = {
   displayName: string;
   status: "red" | "orange" | "green";
 };
+
+function toneForStatus(s: "red" | "orange" | "green") {
+  return s === "red" ? "red" : s === "orange" ? "orange" : "green";
+}
 
 export default function NearbyScreen() {
   const router = useRouter();
@@ -267,7 +272,6 @@ export default function NearbyScreen() {
 
   async function handleSignOut() {
     try {
-      // Turn off sharing first (best-effort)
       if (userId) await updatePresence("red", true);
     } catch {}
     await signOut();
@@ -275,87 +279,101 @@ export default function NearbyScreen() {
   }
 
   useEffect(() => {
-    // On screen load: get profile + pending requests
     loadMyProfile();
     loadPendingOutgoing();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
   if (!userId) {
-    // AuthGate should route, but keep this safe.
     return (
-      <SafeAreaView style={{ flex: 1, padding: 16, justifyContent: "center" }}>
-        <Text>Not signed in.</Text>
-      </SafeAreaView>
+      <Screen style={{ justifyContent: "center" }}>
+        <Muted>Not signed in.</Muted>
+      </Screen>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, padding: 16, gap: 12 }}>
-      <Text style={{ fontSize: 22, fontWeight: "700" }}>Nearby</Text>
+    <Screen>
+      <View style={{ gap: 6 }}>
+        <H1>Nearby</H1>
+        <Muted>Signed in as {session?.user?.email}</Muted>
+      </View>
 
-      <Text style={{ opacity: 0.8 }}>Signed in as: {session?.user?.email}</Text>
-
-      <View style={{ gap: 8 }}>
+      <Card style={{ gap: 12 }}>
+        <H2>Profile</H2>
         <Text style={{ fontWeight: "600" }}>Display name</Text>
         <TextInput
           value={displayName}
           onChangeText={setDisplayName}
-          style={{ borderWidth: 1, padding: 10, borderRadius: 10 }}
+          style={{ borderWidth: 1, padding: 12, borderRadius: 12 }}
         />
-        <Button title={loading ? "Saving..." : "Save Profile"} onPress={saveProfile} disabled={loading} />
-      </View>
+        <AppButton title={loading ? "Saving..." : "Save Profile"} onPress={saveProfile} disabled={loading} />
+      </Card>
 
-      <View style={{ gap: 8 }}>
-        <Text style={{ fontWeight: "600" }}>Status (current: {status.toUpperCase()})</Text>
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <Button title="Red" onPress={() => updatePresence("red")} disabled={loading} />
-          <Button title="Orange" onPress={() => updatePresence("orange")} disabled={loading} />
-          <Button title="Green" onPress={() => updatePresence("green")} disabled={loading} />
+      <Card style={{ gap: 12 }}>
+        <H2>Sharing</H2>
+
+        <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
+          <Pill text={`Band: ${bandLabel}`} tone="neutral" />
+          <Pill text={`Status: ${status.toUpperCase()}`} tone={toneForStatus(status)} />
         </View>
-      </View>
 
-      <View style={{ gap: 8 }}>
-        <Text style={{ fontWeight: "600" }}>Band (current: {bandLabel})</Text>
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <Button title="50" onPress={() => setBandM(50)} disabled={loading} />
-          <Button title="100" onPress={() => setBandM(100)} disabled={loading} />
-          <Button title="200" onPress={() => setBandM(200)} disabled={loading} />
-          <Button title="500" onPress={() => setBandM(500)} disabled={loading} />
+        {/* Traffic light control */}
+        <TrafficLight
+          value={status}
+          disabled={loading}
+          onChange={(v) => updatePresence(v)}
+        />
+
+        <Muted>My cell: {myCell ?? "-"}</Muted>
+
+        <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
+          <AppButton title="50m" onPress={() => setBandM(50)} disabled={loading} variant={bandM === 50 ? "primary" : "secondary"} />
+          <AppButton title="100m" onPress={() => setBandM(100)} disabled={loading} variant={bandM === 100 ? "primary" : "secondary"} />
+          <AppButton title="200m" onPress={() => setBandM(200)} disabled={loading} variant={bandM === 200 ? "primary" : "secondary"} />
+          <AppButton title="500m" onPress={() => setBandM(500)} disabled={loading} variant={bandM === 500 ? "primary" : "secondary"} />
         </View>
-      </View>
 
-      <Text>My cell: {myCell ?? "-"}</Text>
+        <AppButton title={loading ? "Checking..." : "Check Nearby"} onPress={fetchNearby} disabled={loading} />
+      </Card>
 
-      <Button title={loading ? "Checking..." : "Check Nearby"} onPress={fetchNearby} disabled={loading} />
+      <Card style={{ gap: 12 }}>
+        <H2>People nearby</H2>
+        {nearby.length === 0 ? (
+          <Muted>No one nearby yet.</Muted>
+        ) : (
+          <View style={{ gap: 10 }}>
+            {nearby.map((p) => {
+              const already = pendingTo.has(p.userId);
+              return (
+                <View
+                  key={p.userId}
+                  style={{
+                    borderWidth: 1,
+                    borderRadius: 14,
+                    padding: 12,
+                    gap: 10,
+                  }}
+                >
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                    <Text style={{ fontWeight: "800" }}>{p.displayName}</Text>
+                    <Pill text={p.status.toUpperCase()} tone={toneForStatus(p.status)} />
+                  </View>
 
-      {nearby.length > 0 ? (
-        <View style={{ gap: 8 }}>
-          <Text style={{ fontWeight: "700" }}>People nearby</Text>
-          {nearby.map((p) => {
-            const already = pendingTo.has(p.userId);
-            return (
-              <View
-                key={p.userId}
-                style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
-              >
-                <Text>
-                  {p.displayName} • {p.status.toUpperCase()}
-                </Text>
-                <Button
-                  title={already ? "Requested" : "Request"}
-                  onPress={() => sendRequest(p.userId)}
-                  disabled={loading || already}
-                />
-              </View>
-            );
-          })}
-        </View>
-      ) : (
-        <Text style={{ opacity: 0.7 }}>No one nearby yet.</Text>
-      )}
+                  <AppButton
+                    title={already ? "Requested" : "Send request"}
+                    onPress={() => sendRequest(p.userId)}
+                    disabled={loading || already}
+                    variant={already ? "secondary" : "primary"}
+                  />
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </Card>
 
-      <Button title="Sign Out" onPress={handleSignOut} />
-    </SafeAreaView>
+      <AppButton title="Sign Out" onPress={handleSignOut} variant="secondary" />
+    </Screen>
   );
 }

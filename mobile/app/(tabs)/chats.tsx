@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { Alert, Button, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Alert, Pressable, ScrollView, View } from "react-native";
 import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../lib/auth";
+import { AppButton, Card, H1, H2, Muted, Pill, Screen } from "../../ui/components";
 
 type MatchRow = {
   id: string | number;
@@ -49,9 +49,9 @@ export default function ChatsScreen() {
     setNameMap((prev) => ({ ...prev, ...next }));
   }
 
-  async function refresh() {
+  async function refresh(silent = false) {
     if (!userId) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
 
     try {
       const { data, error } = await supabase
@@ -68,55 +68,101 @@ export default function ChatsScreen() {
       const ids = rows.flatMap((m) => [m.user_a, m.user_b]);
       await loadNames(ids);
     } catch (e: any) {
-      Alert.alert("Chats load failed", e?.message ?? String(e));
+      if (!silent) Alert.alert("Chats load failed", e?.message ?? String(e));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
+  // Initial load
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
+  // Realtime: refresh when matches change for either side
+  useEffect(() => {
+    if (!userId) return;
+
+    const chA = supabase
+      .channel(`matches:user_a:${userId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "matches", filter: `user_a=eq.${userId}` },
+        () => refresh(true)
+      )
+      .subscribe();
+
+    const chB = supabase
+      .channel(`matches:user_b:${userId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "matches", filter: `user_b=eq.${userId}` },
+        () => refresh(true)
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(chA);
+      supabase.removeChannel(chB);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
   if (!userId) {
     return (
-      <SafeAreaView style={{ flex: 1, padding: 16, justifyContent: "center" }}>
-        <Text>Not signed in.</Text>
-      </SafeAreaView>
+      <Screen style={{ justifyContent: "center" }}>
+        <Muted>Not signed in.</Muted>
+      </Screen>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, padding: 16, gap: 12 }}>
-      <Text style={{ fontSize: 22, fontWeight: "700" }}>Chats</Text>
+    <Screen>
+      <View style={{ gap: 6 }}>
+        <H1>Chats</H1>
+        <Muted>Your matches and conversations.</Muted>
+      </View>
 
-      <Button title={loading ? "Loading..." : "Refresh"} onPress={refresh} disabled={loading} />
+      <AppButton
+        title={loading ? "Refreshing..." : "Refresh"}
+        onPress={() => refresh()}
+        disabled={loading}
+        variant="secondary"
+      />
 
-      {matches.length === 0 ? (
-        <Text style={{ opacity: 0.7 }}>No matches yet.</Text>
-      ) : (
-        <View style={{ gap: 10 }}>
-          {matches.map((m) => {
-            const other = otherUser(m);
-            return (
-              <View
-                key={String(m.id)}
-                style={{ borderWidth: 1, padding: 12, borderRadius: 12, gap: 8 }}
-              >
-                <Text style={{ fontWeight: "700" }}>
-                  {other ? showName(other) : "Unknown"}
-                </Text>
-                <Button
-                  title="Open chat"
-                  onPress={() => router.push(`/chat/${String(m.id)}`)}
-                  disabled={loading}
-                />
-              </View>
-            );
-          })}
+      <Card style={{ gap: 10 }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+          <H2>Matches</H2>
+          <Pill text={`${matches.length}`} tone={matches.length ? "green" : "neutral"} />
         </View>
-      )}
-    </SafeAreaView>
+
+        {matches.length === 0 ? (
+          <Muted>No matches yet. Accept a request to start chatting.</Muted>
+        ) : (
+          <ScrollView contentContainerStyle={{ gap: 10, paddingBottom: 6 }}>
+            {matches.map((m) => {
+              const other = otherUser(m);
+              const title = other ? showName(other) : "Unknown";
+              return (
+                <Pressable
+                  key={String(m.id)}
+                  onPress={() => router.push(`/chat/${String(m.id)}`)}
+                  style={{
+                    borderWidth: 1,
+                    borderRadius: 14,
+                    padding: 12,
+                    gap: 6,
+                  }}
+                >
+                  <H2>{title}</H2>
+                  <Muted>Tap to open chat</Muted>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        )}
+      </Card>
+    </Screen>
   );
 }
